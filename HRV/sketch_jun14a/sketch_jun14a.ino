@@ -34,7 +34,39 @@ DFRobot_BloodOxygen_S_HardWareUart MAX30102(&Serial1, 9600);
 #endif
 #endif
 
-std::vector<int> rrIntervals;  // Vector to store RR intervals
+// Constants
+const int MAX_HR_BUFFER_SIZE = 10;
+const int HR_SAMPLING_INTERVAL = 1000; // Sampling interval in milliseconds
+
+int heartRateBuffer[MAX_HR_BUFFER_SIZE];
+int bufferIndex = 0;
+unsigned long previousMillis = 0;
+
+// Function to calculate approximation of HRV from heart rate buffer
+// Calculating HRV last 10 seconds
+float calculateHRV()
+{
+  // Calculate the standard deviation of heart rate values
+  float sum = 0;
+  float mean = 0;
+
+  for (int i = 0; i < MAX_HR_BUFFER_SIZE; i++)
+  {
+    sum += heartRateBuffer[i];
+  }
+  mean = sum / MAX_HR_BUFFER_SIZE;
+
+  float sumSquaredDiff = 0;
+  for (int i = 0; i < MAX_HR_BUFFER_SIZE; i++)
+  {
+    float diff = heartRateBuffer[i] - mean;
+    sumSquaredDiff += diff * diff;
+  }
+  float variance = sumSquaredDiff / MAX_HR_BUFFER_SIZE;
+  float standardDeviation = sqrt(variance);
+
+  return standardDeviation;
+}
 
 void setup()
 {
@@ -48,8 +80,8 @@ void setup()
   Serial.println("start measuring...");
   MAX30102.sensorStartCollect();
 
-  Serial.print("Delay because of bad values at the beginning");
-  delay(1000);
+  Serial.print("Delay because of bad values at the beginning.. Prepare your finger and put it on the sensor..");
+  delay(3000);
 }
 
 // Co 4 sekundy następuje odczyt parametrów pacjenta z czujnika MAX30102
@@ -62,43 +94,51 @@ void setup()
 
 void loop()
 {
-  MAX30102.getHeartbeatSPO2();
-  Serial.print("SPO2 is : ");
-  Serial.print(MAX30102._sHeartbeatSPO2.SPO2);
-  Serial.println("%");
-  Serial.print("heart rate is : ");
-  Serial.print(MAX30102._sHeartbeatSPO2.Heartbeat);
-  Serial.println("Times/min");
-  Serial.print("Temperature value of the board is : ");
-  Serial.print(MAX30102.getTemperature_C());
-  Serial.println(" ℃");
+   // Check if it's time to sample heart rate
+  unsigned long currentMillis = millis();
+  if (currentMillis - previousMillis >= HR_SAMPLING_INTERVAL)
+  {
+    previousMillis = currentMillis;
 
-  // Calculate RR interval and store in the vector
-  int rrInterval = 60 * 1000 / MAX30102._sHeartbeatSPO2.Heartbeat;  // Calculate RR interval in milliseconds
-  rrIntervals.push_back(rrInterval);
+    MAX30102.getHeartbeatSPO2();
 
-  // Perform HRV calculation
-  if (rrIntervals.size() >= 2) {
-    double meanRR = 0;
-    for (int i = 0; i < rrIntervals.size(); i++) {
-      meanRR += rrIntervals[i];
+    Serial.print("SPO2 is : ");
+    Serial.print(MAX30102._sHeartbeatSPO2.SPO2);
+    Serial.println("%");
+
+    Serial.print("heart rate is : ");
+    Serial.print(MAX30102._sHeartbeatSPO2.Heartbeat);
+    int heartRate = MAX30102._sHeartbeatSPO2.Heartbeat;
+    Serial.println("Times/min");
+
+    Serial.print("Temperature value of the board is : ");
+    Serial.print(MAX30102.getTemperature_C());
+    Serial.println(" ℃");
+
+    // Store heart rate in the buffer
+    heartRateBuffer[bufferIndex] = heartRate;
+    bufferIndex++;
+
+    // Check if the buffer is full
+    if (bufferIndex >= MAX_HR_BUFFER_SIZE)
+    {
+      // Calculate HRV
+      float hrv = calculateHRV();
+
+      // Print the HRV value
+      Serial.print("HRV: ");
+      Serial.print(hrv);
+      Serial.println("ms");
+
+      // Reset buffer and index
+      bufferIndex = 0;
     }
-    meanRR /= rrIntervals.size();
 
-    double sdNN = 0;
-    for (int i = 0; i < rrIntervals.size(); i++) {
-      double deviation = rrIntervals[i] - meanRR;
-      sdNN += deviation * deviation;
-    }
-    sdNN = sqrt(sdNN / (rrIntervals.size() - 1));
-
-    Serial.print("SDNN (Standard Deviation of NN intervals): ");
-    Serial.print(sdNN);
-    Serial.println(" ms");
   }
 
   //The sensor updates the data every 4 seconds
-  delay(1000);
+  // delay(100);
   //Serial.println("stop measuring...");
   //MAX30102.sensorEndCollect();
+
 }
