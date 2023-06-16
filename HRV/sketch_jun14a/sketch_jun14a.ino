@@ -10,6 +10,8 @@
   * @url         https://github.com/DFRobot/DFRobot_BloodOxygen_S
 */
 #include "DFRobot_BloodOxygen_S.h"
+#include <vector>
+#include <cmath>
 
 #define I2C_COMMUNICATION  //use I2C for communication, but use the serial port for communication if the line of codes were masked
 
@@ -31,6 +33,9 @@ DFRobot_BloodOxygen_S_SoftWareUart MAX30102(&mySerial, 9600);
 DFRobot_BloodOxygen_S_HardWareUart MAX30102(&Serial1, 9600); 
 #endif
 #endif
+
+std::vector<int> rrIntervals;  // Vector to store RR intervals
+
 void setup()
 {
   Serial.begin(115200);
@@ -42,7 +47,18 @@ void setup()
   Serial.println("init success!");
   Serial.println("start measuring...");
   MAX30102.sensorStartCollect();
+
+  Serial.print("Delay because of bad values at the beginning");
+  delay(1000);
 }
+
+// Co 4 sekundy następuje odczyt parametrów pacjenta z czujnika MAX30102
+// Dodatkowo obliczamy HRV w następujący sposób:
+// Po każdym odczycie, obliczamy interwał RR w milisekundach
+// (jako 60 000 ms podzielone przez liczbę uderzeń serca na minutę). 
+// Następnie dodajemy ten interwał RR do wektora rrIntervals. 
+// Jeśli wektor ten zawiera co najmniej dwa interwały, obliczamy średnią 
+//wartość RR oraz odchylenie standardowe (SDNN) tych interwałów. 
 
 void loop()
 {
@@ -56,8 +72,33 @@ void loop()
   Serial.print("Temperature value of the board is : ");
   Serial.print(MAX30102.getTemperature_C());
   Serial.println(" ℃");
+
+  // Calculate RR interval and store in the vector
+  int rrInterval = 60 * 1000 / MAX30102._sHeartbeatSPO2.Heartbeat;  // Calculate RR interval in milliseconds
+  rrIntervals.push_back(rrInterval);
+
+  // Perform HRV calculation
+  if (rrIntervals.size() >= 2) {
+    double meanRR = 0;
+    for (int i = 0; i < rrIntervals.size(); i++) {
+      meanRR += rrIntervals[i];
+    }
+    meanRR /= rrIntervals.size();
+
+    double sdNN = 0;
+    for (int i = 0; i < rrIntervals.size(); i++) {
+      double deviation = rrIntervals[i] - meanRR;
+      sdNN += deviation * deviation;
+    }
+    sdNN = sqrt(sdNN / (rrIntervals.size() - 1));
+
+    Serial.print("SDNN (Standard Deviation of NN intervals): ");
+    Serial.print(sdNN);
+    Serial.println(" ms");
+  }
+
   //The sensor updates the data every 4 seconds
-  delay(4000);
+  delay(1000);
   //Serial.println("stop measuring...");
   //MAX30102.sensorEndCollect();
 }
